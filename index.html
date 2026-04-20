@@ -224,15 +224,38 @@
     </div>
 
     <!-- Supabase JS SDK. anon key is safe to expose: it's the same public
-         key shipped in the iOS app bundle; RLS gates what it can do. -->
-    <script src="https://unpkg.com/@supabase/supabase-js@2.58.0/dist/umd/supabase.min.js"></script>
-    <script>
-      (function () {
+         key shipped in the iOS app bundle; RLS gates what it can do.
+         Loaded as ESM from esm.sh — floating @2 tag so we always get the
+         latest v2 without pinning a version that may get unpublished. -->
+    <script type="module">
+      // Fail-visible surface: if the module fails to load or the bootstrap
+      // throws, replace the "Verifying…" UI with a clear diagnostic rather
+      // than letting the spinner run forever.
+      function setupError(message) {
+        const verifying = document.getElementById("phase-verifying");
+        const error = document.getElementById("phase-error");
+        const errorBody = document.getElementById("error-body");
+        if (errorBody) errorBody.textContent = message;
+        if (verifying) verifying.classList.add("hidden");
+        if (error) error.classList.remove("hidden");
+      }
+
+      // Watchdog: if establishSession hasn't resolved in 15s, show an error
+      // instead of leaving the user on the spinner.
+      let watchdog = setTimeout(function () {
+        setupError(
+          "This is taking longer than expected. Check your connection and try the link again."
+        );
+      }, 15000);
+
+      try {
+        const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
+
         const SUPABASE_URL = "https://mblnytacmaxeasrfyydr.supabase.co";
         const SUPABASE_ANON_KEY =
           "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ibG55dGFjbWF4ZWFzcmZ5eWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYxNTMxNjMsImV4cCI6MjA5MTcyOTE2M30.o2ft8oc9HuiJVrVCmpSIjAQdvkT0alUpNOTAXhD-uxg";
 
-        const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
           auth: { flowType: "pkce", detectSessionInUrl: false, persistSession: false },
         });
 
@@ -341,10 +364,16 @@
         });
 
         // Bootstrap: start verifying on load.
-        establishSession().then(function (ok) {
-          if (ok) showPhase("form");
-        });
-      })();
+        const ok = await establishSession();
+        clearTimeout(watchdog);
+        if (ok) showPhase("form");
+      } catch (err) {
+        clearTimeout(watchdog);
+        console.error("shiftowl-reset bootstrap failed", err);
+        setupError(
+          "We couldn't load the reset page. Please try the link again, or contact support."
+        );
+      }
     </script>
   </body>
 </html>
