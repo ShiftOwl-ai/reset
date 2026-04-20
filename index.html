@@ -279,7 +279,22 @@
         }
 
         function parseParams() {
-          // PKCE flow lands as ?code=… ; implicit as #access_token=…
+          const q = new URLSearchParams(window.location.search);
+          if (q.get("error_description")) {
+            return { error: q.get("error_description") };
+          }
+          // Preferred path: email template bypasses Supabase's /auth/v1/verify
+          // redirect and lands directly here with token_hash. We call
+          // verifyOtp server-side — no PKCE verifier needed, which is the
+          // whole point (the verifier is in the phone's keychain and can't
+          // cross over to the web client).
+          const tokenHash = q.get("token_hash");
+          const type = q.get("type");
+          if (tokenHash) {
+            return { tokenHash, type: type || "recovery" };
+          }
+          // Legacy fallbacks in case a stray link from the old template
+          // format lands here.
           const hash = window.location.hash.startsWith("#")
             ? new URLSearchParams(window.location.hash.slice(1))
             : null;
@@ -288,10 +303,6 @@
               accessToken: hash.get("access_token"),
               refreshToken: hash.get("refresh_token") || null,
             };
-          }
-          const q = new URLSearchParams(window.location.search);
-          if (q.get("error_description")) {
-            return { error: q.get("error_description") };
           }
           if (q.get("code")) return { code: q.get("code") };
           return {};
@@ -302,6 +313,17 @@
           if (params.error) {
             goError(decodeURIComponent(params.error));
             return false;
+          }
+          if (params.tokenHash) {
+            const { error } = await sb.auth.verifyOtp({
+              token_hash: params.tokenHash,
+              type: params.type,
+            });
+            if (error) {
+              goError("This reset link has expired or was already used.");
+              return false;
+            }
+            return true;
           }
           if (params.code) {
             const { error } = await sb.auth.exchangeCodeForSession(params.code);
